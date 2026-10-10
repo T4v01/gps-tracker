@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Reportar ubicación</title>
+<style>
+  :root {
+    --bg: #f5f2ff;
+    --panel: #ffffff;
+    --accent: #7c3aed;
+    --text: #2a1a4a;
+    --muted: #7a6a9c;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh;
+    padding: 24px;
+    padding-top: max(24px, env(safe-area-inset-top));
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+  }
+  .card {
+    width: 100%; max-width: 380px;
+    background: var(--panel);
+    border-radius: 18px;
+    padding: 28px 24px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 6px; font-weight: 600; }
+  p.sub { color: var(--muted); margin: 0 0 24px; font-size: 0.92rem; }
+
+  .pulse {
+    width: 64px; height: 64px; margin: 0 auto 20px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(124,58,237,0.35), transparent 70%);
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  .pulse::before {
+    content: ""; position: absolute; width: 100%; height: 100%;
+    border-radius: 50%; background: rgba(124,58,237,0.25);
+    animation: pulse 2s infinite;
+  }
+  .pulse .dot { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); z-index: 1; }
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0.8; }
+    100% { transform: scale(1.8); opacity: 0; }
+  }
+  .pulse.off .dot { background: #e11d48; }
+  .pulse.off::before { display: none; }
+
+  .estado { font-size: 0.95rem; margin-bottom: 4px; font-weight: 500; }
+  .detalle { font-size: 0.8rem; color: var(--muted); min-height: 1.2em; }
+
+  input[type=text] {
+    width: 100%; margin-top: 20px; padding: 12px 14px;
+    border-radius: 10px; border: 1px solid #ddd3fa;
+    background: #faf8ff; color: var(--text); font-size: 0.95rem;
+  }
+  button {
+    width: 100%; margin-top: 14px; padding: 13px;
+    border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600;
+    background: var(--accent); color: #ffffff; cursor: pointer;
+  }
+  button:active { opacity: 0.85; }
+  .uuid { margin-top: 18px; font-size: 0.72rem; color: var(--muted); word-break: break-all; }
+  button.sos { background: #e11d48; color: #fff; width: 100%; margin-top: 18px; padding: 16px; font-size: 1rem; font-weight: 800;
+    border: none; border-radius: 14px; box-shadow: 0 8px 20px rgba(225,29,72,.35); touch-action: none; user-select: none; }
+  button.sos.presionando { transform: scale(.97); filter: brightness(1.15); }
+  button.sos.activo { background: #16a34a; box-shadow: 0 8px 20px rgba(22,163,74,.35); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="pulse off" id="pulse"><div class="dot"></div></div>
+    <h1 id="titulo">Reportando ubicación</h1>
+    <p class="sub">Deja esta página abierta para que tu ubicación se siga enviando.</p>
+
+    <div class="estado" id="estado">Solicitando permiso de ubicación…</div>
+    <button class="sos" id="btnSos">🆘 Botón de pánico (mantén 2 s)</button>
+    <div class="detalle" id="detalle"></div>
+
+    <input type="text" id="nombreInput" placeholder="Nombre para este dispositivo (opcional)" />
+    <button id="guardarNombre">Guardar nombre</button>
+
+    <div class="uuid" id="uuidTexto"></div>
+  </div>
+
+<script>
+  const TOKEN = new URLSearchParams(location.search).get('token') || localStorage.getItem('gps_token') || '';
+  if (TOKEN) localStorage.setItem('gps_token', TOKEN);
+
+  function generarUUID() {
+    return crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+  let deviceUuid = localStorage.getItem('gps_device_uuid');
+  if (!deviceUuid) { deviceUuid = generarUUID(); localStorage.setItem('gps_device_uuid', deviceUuid); }
+  document.getElementById('uuidTexto').textContent = 'ID de este dispositivo: ' + deviceUuid;
+  document.getElementById('nombreInput').value = localStorage.getItem('gps_device_nombre') || '';
+
+  const pulse = document.getElementById('pulse');
+  const estado = document.getElementById('estado');
+  const detalle = document.getElementById('detalle');
+
+  let cola = [];
+  try { cola = JSON.parse(localStorage.getItem('gps_cola') || '[]'); } catch (e) {}
+  let ultima = null, ultimoEnvioMs = 0, enviados = 0, bateria = null, enviando = false, wake = null;
+
+  const guardarCola = () => { try { localStorage.setItem('gps_cola', JSON.stringify(cola)); } catch (e) {} };
+
+  function dist(a, b) {  // metros (Haversine)
+    const R = 6371000, rad = Math.PI / 180;
+    const dLat = (b.latitude - a.latitude) * rad, dLng = (b.longitude - a.longitude) * rad;
+    const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+
+  if (navigator.getBattery) {
+    navigator.getBattery().then(b => {
+      const f = () => { bateria = Math.round(b.level * 100); };
+      f(); b.addEventListener('levelchange', f);
+    }).catch(() => {});
+  }
+
+  async function pedirWake() {
+    try {
+      if ('wakeLock' in navigator && !wake) {
+        wake = await navigator.wakeLock.request('screen');
+        wake.addEventListener('release', () => { wake = null; pintar(); });
+      }
+    } catch (e) {}
+  }
+  pedirWake();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pedirWake(); });
+
+  function pintar() {
+    const c = ultima && ultima.coords;
+    detalle.textContent = [
+      c ? `±${Math.round(c.accuracy)} m` : null,
+      c && c.speed != null ? `${(c.speed * 3.6).toFixed(0)} km/h` : null,
+      bateria != null ? `Batería ${bateria}%` : null,
+      `Enviados: ${enviados}`,
+      cola.length ? `En cola: ${cola.length}` : null,
+      wake ? 'Pantalla activa' : null,
+    ].filter(Boolean).join(' · ');
+  }
+
+  function encolar(pos) {
+    const c = pos.coords;
+    cola.push({ lat: c.latitude, lng: c.longitude, accuracy: c.accuracy, speed: c.speed,
+                heading: c.heading, altitude: c.altitude, battery: bateria, timestamp: pos.timestamp });
+    if (cola.length > 2000) cola.splice(0, cola.length - 2000);
+    guardarCola();
+    vaciarCola();
+  }
+
+  async function vaciarCola() {
+    if (enviando || !cola.length) return;
+    enviando = true;
+    const lote = cola.slice(0, 200);
+    let ok = false;
+    try {
+      const r = await fetch('/api/ubicaciones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Token': TOKEN },
+        body: JSON.stringify({ uuid: deviceUuid, nombre: localStorage.getItem('gps_device_nombre') || null,
+                               source: 'web', puntos: lote }),
+      });
+      if (r.status === 401) throw new Error('Clave inválida (abre /telefono?token=TU_CLAVE)');
+      if (!r.ok) throw new Error('Servidor: ' + r.status);
+      cola.splice(0, lote.length); guardarCola(); enviados += lote.length; ok = true;
+      pulse.classList.remove('off'); estado.textContent = 'Enviando ubicación';
+    } catch (e) {
+      pulse.classList.add('off');
+      estado.textContent = navigator.onLine ? (e.message || 'Servidor no responde') : 'Sin internet (guardando en cola)';
+    } finally { enviando = false; }
+    pintar();
+    if (ok && cola.length) vaciarCola();
+  }
+
+  let ancla = null;   // último punto enviado: referencia para ignorar la deriva del GPS
+  function alPosicion(pos) {
+    ultima = pos;
+    const c = pos.coords;
+    if (c.accuracy <= 50) {   // descarta lecturas imprecisas
+      const quieto = (c.speed || 0) < 0.8;
+      const umbral = quieto ? Math.max(10, c.accuracy * 1.5) : Math.max(3, c.accuracy * 0.3);
+      if (!ancla || dist(ancla.coords, c) >= umbral) { ancla = pos; ultimoEnvioMs = Date.now(); encolar(pos); }
+    }
+    pintar();
+  }
+
+  function manejarError(err) {
+    if (err.code === 3) { detalle.textContent = 'Buscando señal GPS…'; return; }
+    pulse.classList.add('off');
+    estado.textContent = err.code === 1 ? 'Permiso de ubicación denegado' : 'No se pudo obtener ubicación';
+    detalle.textContent = err.code === 1 ? 'Actívalo en los ajustes del navegador y recarga la página.' : (err.message || '');
+  }
+
+  document.getElementById('guardarNombre').addEventListener('click', () => {
+    localStorage.setItem('gps_device_nombre', document.getElementById('nombreInput').value.trim());
+    if (ultima) { ultimoEnvioMs = Date.now(); encolar({ coords: (ancla || ultima).coords, timestamp: Date.now() }); }
+  });
+
+  if (!('geolocation' in navigator)) {
+    manejarError({ code: 2, message: 'Este navegador no soporta geolocalización.' });
+  } else {
+    navigator.geolocation.watchPosition(alPosicion, manejarError,
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+    // Latido: si no te mueves, repite la última posición cada ~20 s para seguir "en línea"
+    setInterval(() => {
+      if (ultima && Date.now() - ultimoEnvioMs >= 19000) { ultimoEnvioMs = Date.now(); encolar({ coords: (ancla || ultima).coords, timestamp: Date.now() }); }
+    }, 5000);
+    setInterval(vaciarCola, 10000);   // reintenta lo que quedó en cola
+    window.addEventListener('online', vaciarCola);
+  }
+  // ---- Botón de pánico: mantener 2 s; tocar de nuevo = "Estoy bien" ----
+  const btnSos = document.getElementById('btnSos');
+  const TXT_SOS = '🆘 Botón de pánico (mantén 2 s)';
+  let sosTimer = null, sosActivo = false;
+  const cab = { 'Content-Type': 'application/json', 'X-Token': TOKEN };
+  async function enviarSos() {
+    const c = (ultima || {}).coords;
+    try {
+      const r = await fetch('/api/alerta', { method: 'POST', headers: cab, body: JSON.stringify({
+        uuid: deviceUuid, nombre: localStorage.getItem('gps_device_nombre') || null, tipo: 'sos',
+        lat: c ? c.latitude : null, lng: c ? c.longitude : null, accuracy: c ? c.accuracy : null, battery: bateria }) });
+      if (!r.ok) throw new Error(r.status);
+      sosActivo = true; btnSos.classList.add('activo'); btnSos.textContent = '✅ Estoy bien (cancelar SOS)';
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    } catch (e) { alert('No se pudo enviar el SOS. Intenta de nuevo.'); }
+  }
+  async function cancelarSos() {
+    try { await fetch('/api/alerta/cancelar', { method: 'POST', headers: cab, body: JSON.stringify({ uuid: deviceUuid }) }); } catch (e) {}
+    sosActivo = false; btnSos.classList.remove('activo'); btnSos.textContent = TXT_SOS;
+  }
+  btnSos.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (sosActivo) { cancelarSos(); return; }
+    btnSos.classList.add('presionando');
+    sosTimer = setTimeout(() => { btnSos.classList.remove('presionando'); enviarSos(); }, 2000);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => btnSos.addEventListener(ev, () => { clearTimeout(sosTimer); btnSos.classList.remove('presionando'); }));
+  pintar();
+</script>
+</body>
+</html>

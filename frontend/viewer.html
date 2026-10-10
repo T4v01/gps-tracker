@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GPS Tracker · Panel</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+    :root {
+    --bg: #f5f2ff; --panel: #ffffff; --panel-2: #f1ecff; --border: #e3dbfb;
+    --accent: #7c3aed; --accent-dim: #c4b5fd; --text: #2a1a4a; --muted: #7a6a9c; --danger: #e11d48;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+
+  .layout { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+
+  /* ---------- Sidebar ---------- */
+  aside { background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden; }
+  .brand { padding: 20px 20px 14px; border-bottom: 1px solid var(--border); }
+  .brand h1 { font-size: 1.05rem; margin: 0; font-weight: 600; }
+  .brand p { margin: 4px 0 0; font-size: 0.78rem; color: var(--muted); }
+
+  .device-list { flex: 1; overflow-y: auto; padding: 8px; }
+  .device {
+    padding: 12px 12px; border-radius: 10px; cursor: pointer;
+    display: flex; align-items: center; gap: 10px; margin-bottom: 4px;
+    border: 1px solid transparent;
+  }
+  .device:hover { background: var(--panel-2); }
+  .device.activo { background: var(--panel-2); border-color: var(--accent-dim); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .device-info { min-width: 0; flex: 1; }
+  .device-nombre { font-size: 0.88rem; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  .device-meta { font-size: 0.72rem; color: var(--muted); }
+  .badge-online { font-size: 0.65rem; color: var(--accent); }
+  .badge-offline { font-size: 0.65rem; color: var(--muted); }
+
+  .device-empty { padding: 24px 16px; color: var(--muted); font-size: 0.85rem; text-align: center; }
+
+  /* ---------- Panel de historial ---------- */
+  .historial-panel { border-top: 1px solid var(--border); padding: 16px 20px 20px; background: var(--panel); }
+  .historial-panel h3 { margin: 0 0 10px; font-size: 0.85rem; color: var(--muted); font-weight: 600; text-transform: none; }
+  .campo { margin-bottom: 8px; }
+  .campo label { display: block; font-size: 0.72rem; color: var(--muted); margin-bottom: 3px; }
+  input[type=date], input[type=time] {
+    width: 100%; padding: 7px 8px; border-radius: 7px; border: 1px solid var(--border);
+    background: #faf8ff; color: var(--text); font-size: 0.82rem;
+  }
+  .fila-doble { display: flex; gap: 8px; }
+  .fila-doble > div { flex: 1; }
+  .btns { display: flex; gap: 8px; margin-top: 10px; }
+  button {
+    padding: 9px 12px; border: none; border-radius: 8px; font-size: 0.82rem; font-weight: 600;
+    cursor: pointer; background: var(--accent); color: #ffffff; flex: 1;
+  }
+  button.secundario { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  button:active { opacity: 0.85; }
+  .ruta-stats { margin-top: 10px; font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
+
+  /* ---------- Mapa ---------- */
+  #map { width: 100%; height: 100%; background: #ece8f8; }
+  .leaflet-popup-content-wrapper { background: var(--panel-2); color: var(--text); border-radius: 10px; }
+  .leaflet-popup-tip { background: var(--panel-2); }
+  .leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
+
+  .marker-etiqueta {
+    background: var(--accent); color: #ffffff; font-size: 0.7rem; font-weight: 700;
+    padding: 2px 7px; border-radius: 20px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+
+  .leaflet-marker-icon { transition: transform 1s linear; }
+  .leaflet-tooltip.etq { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 3px 8px; font-size: 0.72rem; line-height: 1.35; box-shadow: 0 2px 8px rgba(0,0,0,.45); }
+  .leaflet-tooltip-top.etq::before { border-top-color: var(--panel-2); }
+  #map.sin-etq .etq { display: none; }
+  .historial-panel { max-height: 60vh; overflow-y: auto; }
+  .opciones label { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 0.75rem; color: var(--muted); }
+  .chips { display: flex; gap: 6px; margin: 6px 0 2px; }
+  .chips button { padding: 5px 6px; font-size: 0.72rem; }
+  button.peligro { background: #ffe4e9; color: #be123c; border: 1px solid #fecdd3; }
+  input[type=color] { width: 38px; height: 32px; border: none; background: none; padding: 0; cursor: pointer; }          /* movimiento suave en vivo */
+  .leaflet-zoom-anim .leaflet-marker-icon { transition: none !important; }
+  @media (max-width: 800px) {
+    .layout { grid-template-columns: 1fr; grid-template-rows: 55vh 45vh; }
+    .layout > #map { order: -1; }
+    aside { border-right: none; border-top: 1px solid var(--border); }
+    .historial-panel { padding: 10px 14px; }
+  }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  body { background: var(--bg); }
+  aside { box-shadow: 4px 0 24px rgba(124,58,237,.10); }
+  .brand { background: linear-gradient(135deg,#7c3aed,#a78bfa); border-bottom: none; border-radius: 0 0 22px 22px; padding-bottom: 18px; }
+  .brand h1 { color: #fff; font-size: 1.2rem; font-weight: 800; }
+  .brand p { color: rgba(255,255,255,.9); }
+  .brand .ghost { background: rgba(255,255,255,.2); color: #fff; border: 1px solid rgba(255,255,255,.4); border-radius: 10px; padding: 7px 10px; font-size: .72rem; font-weight: 600; cursor: pointer; flex: 1; }
+  .brand .ghost.on { background: #fff; color: #7c3aed; }
+  .tabs { display: flex; padding: 10px 12px 0; }
+  .tabs button { flex: 1; background: transparent; color: var(--muted); border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px; font-weight: 700; cursor: pointer; font-size: .8rem; }
+  .tabs button.activa { color: var(--accent); border-bottom-color: var(--accent); }
+  .device { background: #fff; border: 1px solid var(--border); border-radius: 14px; margin-bottom: 8px; box-shadow: 0 1px 4px rgba(124,58,237,.08); }
+  .device.activo { background: var(--panel-2); border-color: var(--accent); }
+  .device.sos { border-color: #e11d48; background: #fff1f3; animation: parpadeo 1s infinite; }
+  @keyframes parpadeo { 50% { box-shadow: 0 0 0 4px rgba(225,29,72,.25); } }
+  .sos-pulse { width: 28px; height: 28px; border-radius: 50%; background: rgba(225,29,72,.35); border: 3px solid #e11d48; animation: onda 1.2s infinite; }
+  @keyframes onda { 0% { transform: scale(.6); opacity: 1; } 100% { transform: scale(2.4); opacity: 0; } }
+  #toasts { position: fixed; top: 14px; right: 14px; z-index: 5000; display: flex; flex-direction: column; gap: 10px; width: min(340px, calc(100vw - 28px)); }
+  .toast { background: #fff; border-radius: 16px; padding: 14px 16px; box-shadow: 0 12px 32px rgba(42,26,74,.25); border-left: 6px solid var(--accent); font-size: .85rem; color: var(--text); animation: entra .25s ease-out; }
+  .toast.sos { border-left-color: #e11d48; background: #fff1f3; }
+  .toast-t { font-weight: 800; font-size: 1rem; margin-bottom: 2px; }
+  .toast-s { color: var(--muted); font-size: .72rem; margin-top: 4px; }
+  .toast-b { display: flex; gap: 8px; margin-top: 10px; }
+  .toast-b button { flex: 1; padding: 7px; font-size: .75rem; }
+  @keyframes entra { from { transform: translateX(30px); opacity: 0; } }
+  .toast.caida, .toast.impacto { border-left-color: #e11d48; background: #fff1f3; }
+  .leaflet-container { background: #ece8f8; }
+  #map.suave .leaflet-tile-pane { filter: saturate(.7) brightness(1.04) contrast(.97); }
+  body .layout { display: grid; grid-template-columns: 76px 350px 1fr; height: 100vh; height: 100dvh; }
+  body .layout.sin-panel { grid-template-columns: 76px 0 1fr; }
+  .layout.sin-panel aside { display: none; }
+  .rail { background: linear-gradient(180deg,#5b21b6,#7c3aed); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 0; z-index: 1200; }
+  .rail .logo { font-size: 1.6rem; margin-bottom: 12px; }
+  .rail-btn { position: relative; width: 62px; flex: none; background: transparent; color: rgba(255,255,255,.8); border-radius: 14px; padding: 9px 0 7px; font-size: 1.25rem; display: flex; flex-direction: column; align-items: center; gap: 3px; line-height: 1; }
+  .rail-btn span { font-size: .6rem; font-weight: 700; }
+  .rail-btn:hover { background: rgba(255,255,255,.14); }
+  .rail-btn.activa { background: rgba(255,255,255,.24); color: #fff; }
+  .rail .badge { position: absolute; top: 2px; right: 4px; font-style: normal; font-size: .6rem; background: #e11d48; color: #fff; border-radius: 9px; padding: 1px 5px; }
+  .rail .badge:empty { display: none; }
+  aside { min-width: 0; }
+  .brand { background: var(--panel); border-bottom: 1px solid var(--border); border-radius: 0; padding: 18px 20px 12px; }
+  .brand-top { display: flex; align-items: center; justify-content: space-between; }
+  .brand h1 { color: var(--text); font-size: 1.15rem; }
+  .brand p { color: var(--muted); }
+  .icon-btn { flex: none; width: 30px; height: 30px; padding: 0; border-radius: 9px; background: var(--panel-2); color: var(--accent); }
+  .sec { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; }
+  .sec[hidden] { display: none; }
+  .sec .device-list { padding: 0; overflow: visible; flex: none; }
+  .sec h3 { font-size: .7rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 18px 0 8px; }
+  .tarjeta { background: var(--panel-2); border-radius: 14px; padding: 12px 14px; margin-top: 12px; }
+  .seg { display: flex; gap: 6px; }
+  .seg button { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .seg button.activa { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .fila-sw { display: flex; justify-content: space-between; align-items: center; padding: 11px 2px; border-bottom: 1px solid var(--border); font-size: .85rem; color: var(--text); cursor: pointer; }
+  .fila-sw input { accent-color: var(--accent); width: 18px; height: 18px; }
+  #btnAlertas { width: 100%; flex: none; padding: 12px; }
+  #btnAlertas.on { background: var(--panel-2); color: var(--accent); border: 1px solid var(--accent-dim); }
+  @media (max-width: 800px) {
+    body .layout, body .layout.sin-panel { grid-template-columns: 1fr; grid-template-rows: 1fr 62px; }
+    .rail { grid-row: 2; flex-direction: row; justify-content: space-around; padding: 4px 8px; gap: 0; }
+    .rail .logo { display: none; }
+    .rail-btn { padding: 6px 0; }
+    #map { grid-row: 1; grid-column: 1; }
+    aside { position: fixed; left: 0; right: 0; bottom: 62px; height: 52vh; z-index: 1100; border: none; border-radius: 22px 22px 0 0; box-shadow: 0 -10px 30px rgba(42,26,74,.22); }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav class="rail">
+    <div class="logo">📍</div>
+    <button class="rail-btn activa" data-sec="disp" title="Dispositivos">📱<span>Equipos</span></button>
+    <button class="rail-btn" data-sec="al" title="Alertas">🚨<span>Alertas</span><i class="badge" id="contAl"></i></button>
+    <button class="rail-btn" data-sec="hist" title="Historial de rutas">🗺️<span>Rutas</span></button>
+    <button class="rail-btn" data-sec="cfg" title="Ajustes">⚙️<span>Ajustes</span></button>
+  </nav>
+
+  <aside>
+    <div class="brand">
+      <div class="brand-top"><h1 id="tituloSec">Dispositivos</h1><button class="icon-btn" id="btnCerrarPanel" title="Ocultar panel">«</button></div>
+      <p id="resumenDispositivos">Cargando dispositivos…</p>
+    </div>
+
+    <section class="sec" id="sec-disp">
+      <div class="device-list" id="listaDispositivos">
+        <div class="device-empty">Ningún dispositivo se ha conectado todavía.<br><br>
+          Abre <code>/telefono</code> desde un celular o instala la app geo_app.</div>
+      </div>
+      <h3>Gestionar el seleccionado</h3>
+      <div class="tarjeta">
+        <div class="btns" style="margin-top:0; flex-wrap:wrap; align-items:center">
+          <input type="color" id="colorDisp" title="Color del dispositivo">
+          <button class="secundario" id="btnRenombrar">Renombrar</button>
+          <button class="peligro" id="btnEliminar">Eliminar</button>
+        </div>
+        <div class="btns" style="margin-top:8px">
+          <button class="secundario" id="btnSonar">🔔 Hacer sonar</button>
+          <button class="secundario" id="btnUbicar">⌖ Pedir ubicación</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="sec-al" hidden>
+      <div class="device-list" id="listaAlertas"></div>
+    </section>
+
+    <section class="sec" id="sec-hist" hidden>
+      <div class="campo">
+        <label>Dispositivo seleccionado</label>
+        <div id="dispositivoSeleccionado" style="font-size:0.9rem; font-weight:600; color: var(--text);">Ninguno</div>
+        <label style="margin-top:8px"><input type="checkbox" id="seguir"> Seguir en vivo</label>
+      </div>
+      <div class="fila-doble">
+        <div class="campo"><label>Desde</label><input type="date" id="fechaDesde" /></div>
+        <div class="campo"><label>Hasta</label><input type="date" id="fechaHasta" /></div>
+      </div>
+      <div class="chips">
+        <button class="secundario" data-rango="hoy">Hoy</button>
+        <button class="secundario" data-rango="ayer">Ayer</button>
+        <button class="secundario" data-rango="7d">7 días</button>
+        <button class="secundario" data-rango="todo">Todo</button>
+      </div>
+      <div class="btns">
+        <button id="btnVerRuta">Ver ruta</button>
+        <button class="secundario" id="btnLimpiarRuta">Limpiar</button>
+        <button class="secundario" id="btnGpx">GPX</button>
+        <button class="secundario" id="btnPlay" title="Reproducir ruta">▶</button>
+      </div>
+      <div class="ruta-stats tarjeta" id="rutaStats">Elige un dispositivo y pulsa "Ver ruta".</div>
+      <button class="peligro" id="btnBorrarRuta" style="margin-top:12px; flex:none">Borrar historial</button>
+    </section>
+
+    <section class="sec" id="sec-cfg" hidden>
+      <h3 style="margin-top:0">Mapa base</h3>
+      <div class="seg">
+        <button data-base="osm">Mapa</button>
+        <button data-base="sat">Satélite</button>
+        <button data-base="topo">Relieve</button>
+      </div>
+      <h3>Mostrar en el mapa</h3>
+      <label class="fila-sw">Trazos de ruta <input type="checkbox" id="optTrazos" checked></label>
+      <label class="fila-sw">Etiquetas <input type="checkbox" id="optEtq" checked></label>
+      <label class="fila-sw">Círculo de precisión <input type="checkbox" id="optPrec" checked></label>
+      <label class="fila-sw">Suavizar deriva del GPS <input type="checkbox" id="optSuave" checked></label>
+      <h3>Alertas</h3>
+      <button id="btnAlertas">🔔 Activar alertas y sonido</button>
+      <h3>Lugares (geocercas)</h3>
+      <button class="secundario" id="btnAddLugar" style="width:100%; flex:none">＋ Agregar lugar en el mapa</button>
+      <div id="listaLugares"></div>
+      <h3>Vista</h3>
+      <button class="secundario" id="btnCentrar" style="width:100%; flex:none">⌖ Ver todos los dispositivos</button>
+    </section>
+  </aside>
+
+  <div id="map"></div>
+</div>
+
+<div id="toasts"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+  const map = L.map('map', { zoomControl: true }).setView([-13.53, -71.97], 5);
+  const bases = {
+    osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }),
+    sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles &copy; Esri' }),
+    topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '&copy; OpenTopoMap' }),
+  };
+  let baseActual = localStorage.getItem('gps_base');
+  if (!bases[baseActual]) baseActual = 'osm';
+  bases[baseActual].addTo(map);
+  document.getElementById('map').classList.toggle('suave', baseActual === 'osm');
+
+  const paleta = ['#7c3aed','#ec4899','#0ea5e9','#f59e0b','#10b981','#ef4444','#6366f1','#14b8a6','#f97316','#8b5cf6','#06b6d4','#84cc16','#d946ef','#3b82f6','#e11d48','#22c55e'];
+  const colores = {}, sosActivos = {};
+  function colorPara(uuid) {   // color elegido por el usuario, o uno distinto por dispositivo
+    const d = dispositivos[uuid];
+    if (d && d.color) return d.color;
+    return colores[uuid] || (colores[uuid] = paleta[Object.keys(colores).length % paleta.length]);
+  }
+
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const KEY = new URLSearchParams(location.search).get('key') || localStorage.getItem('gps_key') || '';
+  if (KEY) localStorage.setItem('gps_key', KEY);
+  const api = (url) => fetch(url, { headers: { 'X-Key': KEY } }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+  let skew = 0;          // diferencia de reloj servidor - navegador
+  const estelas = {}, circulos = {};
+  function estela(uuid) {   // trazo con sombra para que se vea sobre cualquier mapa
+    if (!estelas[uuid]) {
+      const o = { lineCap: 'round', lineJoin: 'round', interactive: false };
+      estelas[uuid] = {
+        sombra: L.polyline([], { ...o, color: '#000', weight: 9, opacity: 0.25 }).addTo(map),
+        linea: L.polyline([], { ...o, color: colorPara(uuid), weight: 5, opacity: 0.95 }).addTo(map),
+      };
+    }
+    return estelas[uuid];
+  }
+  const suavizar = () => document.getElementById('optSuave').checked;
+  function agregarEstela(uuid, pos, acc) {
+    const e = estela(uuid), pts = e.linea.getLatLngs(), ult = pts[pts.length - 1];
+    if (suavizar() && ult && map.distance(ult, pos) < Math.max(5, (acc || 0) * 0.8)) return;  // ignora el temblor del GPS
+    pts.push(pos); if (pts.length > 3000) pts.shift();
+    e.linea.setLatLngs(pts); e.sombra.setLatLngs(pts);
+  }
+  function filtrarRuido(puntos) {   // quita puntos mientras el celular está quieto
+    if (!suavizar()) return puntos;
+    const out = [];
+    for (const p of puntos) {
+      const u = out[out.length - 1];
+      if (!u || map.distance([u.lat, u.lng], [p.lat, p.lng]) >= Math.max(5, (p.accuracy || 0) * 0.8)) out.push(p);
+    }
+    return out;
+  }
+  const ultimoDato = {};
+  function textoEtiqueta(uuid) {
+    const d = ultimoDato[uuid] || {}, disp = dispositivos[uuid] || {};
+    const cuando = disp.ultima_conexion || d.timestamp, on = estaOnline(cuando), partes = [];
+    if (d.battery != null) partes.push('🔋' + Math.round(d.battery) + '%');
+    partes.push(on ? actividad(d.speed || 0) + ' · ' + ((d.speed || 0) * 3.6).toFixed(0) + ' km/h' : 'sin señal · ' + tiempoRelativo(cuando));
+    return `<span style="color:${colorPara(uuid)}">●</span> ${sosActivos[uuid] ? '🆘 ' : ''}<strong>${esc(disp.nombre || d.nombre || uuid)}</strong><br>${partes.join(' · ')}`;
+  }
+  function refrescarEtiqueta(uuid) {
+    const m = marcadores[uuid]; if (!m) return;
+    if (m.getTooltip()) m.setTooltipContent(textoEtiqueta(uuid));
+    else m.bindTooltip(textoEtiqueta(uuid), { permanent: true, direction: 'top', offset: [0, -12], className: 'etq' });
+  }
+  function aplicarColor(uuid) {
+    const c = colorPara(uuid);
+    if (marcadores[uuid]) marcadores[uuid].setIcon(iconoPara(uuid));
+    if (estelas[uuid]) estelas[uuid].linea.setStyle({ color: c });
+    if (circulos[uuid]) circulos[uuid].setStyle({ color: c });
+    refrescarEtiqueta(uuid); renderListaDispositivos();
+  }
+  function aplicarOpciones() {
+    const trz = document.getElementById('optTrazos').checked, prec = document.getElementById('optPrec').checked;
+    Object.values(estelas).forEach(e => [e.sombra, e.linea].forEach(l => trz ? l.addTo(map) : map.removeLayer(l)));
+    Object.values(circulos).forEach(c => prec ? c.addTo(map) : map.removeLayer(c));
+    document.getElementById('map').classList.toggle('sin-etq', !document.getElementById('optEtq').checked);
+  }
+  function fechaCorta(iso) {
+    return iso ? new Date(iso).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+  }
+  let ultimaRuta = [];
+  const marcadores = {};   // uuid -> L.marker
+  const dispositivos = {}; // uuid -> datos
+  let uuidActivo = null;
+  let capaRuta = null;
+
+  function tiempoRelativo(iso) {
+    if (!iso) return 'sin datos';
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const min = Math.floor(diffMs / 60000);
+    if (min < 1) return 'ahora mismo';
+    if (min < 60) return `hace ${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `hace ${h} h`;
+    return `hace ${Math.floor(h / 24)} d`;
+  }
+
+  function estaOnline(iso) {
+    if (!iso) return false;
+    return (Date.now() + skew - new Date(iso).getTime()) < 60 * 1000; // sin reporte en 60s => offline
+  }
+
+  function iconoPara(uuid, nombre) {
+    const color = colorPara(uuid);
+    return L.divIcon({
+      className: '',
+      html: `<div style="width:16px;height:16px;border-radius:50%;background:${color};border:2px solid #ffffff;box-shadow:0 0 0 4px ${color}33;"></div>`,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+  }
+
+  function actualizarMarcador(d) {
+    const pos = [d.lat, d.lng];
+    if (marcadores[d.uuid]) {
+      marcadores[d.uuid].setLatLng(pos);
+    } else {
+      const m = L.marker(pos, { icon: iconoPara(d.uuid, d.nombre) }).addTo(map);
+      m.on('click', () => seleccionarDispositivo(d.uuid));
+      marcadores[d.uuid] = m;
+    }
+    if (d.live) {
+      agregarEstela(d.uuid, pos, d.accuracy);
+      if (document.getElementById('seguir').checked && d.uuid === uuidActivo) map.panTo(pos);
+    }
+    if (d.accuracy != null) {   // círculo de precisión del GPS
+      if (!circulos[d.uuid]) circulos[d.uuid] = L.circle(pos, { radius: d.accuracy, weight: 1, color: colorPara(d.uuid), fillOpacity: 0.08, interactive: false }).addTo(map);
+      else circulos[d.uuid].setLatLng(pos).setRadius(d.accuracy);
+    }
+    ultimoDato[d.uuid] = { ...(ultimoDato[d.uuid] || {}), ...d };
+    refrescarEtiqueta(d.uuid);
+    aplicarOpciones();
+    marcadores[d.uuid].bindPopup(
+      `<strong>${esc(d.nombre || d.uuid)}</strong><br>` +
+      `Lat/Lng: ${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}<br>` +
+      (d.battery != null ? `Batería: ${d.battery}%<br>` : '') +
+      (d.speed != null ? `Velocidad: ${(d.speed * 3.6).toFixed(0)} km/h<br>` : '') +
+      (d.accuracy != null ? `Precisión: ±${Math.round(d.accuracy)} m<br>` : '') +
+      (d.extra ? Object.entries(d.extra).map(([k, v]) => `${esc(k)}: ${esc(v)}<br>`).join('') : '') +
+      (d.ip ? `IP: ${esc(d.ip)}<br>` : '') +
+      `Actualizado: ${new Date(d.timestamp || d.ultima_conexion).toLocaleString()}`
+    );
+  }
+
+  function renderListaDispositivos() {
+    const cont = document.getElementById('listaDispositivos');
+    const items = Object.values(dispositivos);
+    if (items.length === 0) {
+      cont.innerHTML = '<div class="device-empty">Ningún dispositivo se ha conectado todavía.<br><br>Abre <code>/telefono</code> desde un celular para empezar a reportar ubicación.</div>';
+    } else {
+      items.sort((a, b) => new Date(b.ultima_conexion) - new Date(a.ultima_conexion));
+      cont.innerHTML = items.map(d => {
+        const online = estaOnline(d.ultima_conexion);
+        const color = colorPara(d.uuid);
+        return `
+          <div class="device ${d.uuid === uuidActivo ? 'activo' : ''}${sosActivos[d.uuid] ? ' sos' : ''}" data-uuid="${esc(d.uuid)}">
+            <div class="dot" style="background:${color}"></div>
+            <div class="device-info">
+              <div class="device-nombre">${sosActivos[d.uuid] ? '🆘 ' : ''}${esc(d.nombre || d.uuid)}</div>
+              <div class="device-meta">${online ? '<span class="badge-online">● en línea</span>' : `<span class="badge-offline">● ${tiempoRelativo(d.ultima_conexion)}</span>`}${d.battery != null ? ' · 🔋' + Math.round(d.battery) + '%' : ''}${online && d.speed != null ? ' · ' + actividad(d.speed) + ' ' + (d.speed * 3.6).toFixed(0) + ' km/h' : ''}</div>
+              <div class="device-meta">Últ. conexión: ${fechaCorta(d.ultima_conexion)}</div>
+            </div>
+          </div>`;
+      }).join('');
+      cont.querySelectorAll('.device').forEach(el => {
+        el.addEventListener('click', () => {
+          const uuid = el.dataset.uuid;
+          seleccionarDispositivo(uuid);
+          const d = dispositivos[uuid];
+          if (d && d.ultima_lat != null) map.setView([d.ultima_lat, d.ultima_lng], 15);
+        });
+      });
+    }
+    document.getElementById('resumenDispositivos').textContent =
+      `${items.length} dispositivo${items.length === 1 ? '' : 's'} registrado${items.length === 1 ? '' : 's'}`;
+  }
+
+  function seleccionarDispositivo(uuid) {
+    uuidActivo = uuid;
+    const d = dispositivos[uuid];
+    document.getElementById('dispositivoSeleccionado').textContent = d ? (d.nombre || d.uuid) : uuid;
+    document.getElementById('colorDisp').value = colorPara(uuid);
+    renderListaDispositivos();
+  }
+
+  // ---------- Cargar dispositivos existentes ----------
+  async function cargarDispositivos() {
+    let datos;
+    try { datos = await api('/api/dispositivos'); }
+    catch (e) { document.getElementById('resumenDispositivos').textContent = 'No autorizado: abre /panel?key=TU_CLAVE'; return; }
+    if (datos[0] && datos[0].ahora) skew = new Date(datos[0].ahora) - Date.now();
+    [...datos].sort((a, b) => (a.primera_conexion || '').localeCompare(b.primera_conexion || ''))
+      .forEach(d => { dispositivos[d.uuid] = d; colorPara(d.uuid); });   // un color distinto por dispositivo
+    datos.forEach(d => {
+      d.battery = d.ultima_battery; d.speed = d.ultima_speed;
+      dispositivos[d.uuid] = d;
+      if (d.ultima_lat != null && d.ultima_lng != null) {
+        actualizarMarcador({
+          uuid: d.uuid, nombre: d.nombre, lat: d.ultima_lat, lng: d.ultima_lng,
+          ip: d.ultima_ip, timestamp: d.ultima_conexion,
+          battery: d.ultima_battery, speed: d.ultima_speed, accuracy: d.ultima_accuracy,
+          extra: d.ultima_extra ? JSON.parse(d.ultima_extra) : null,
+        });
+      }
+    });
+    renderListaDispositivos();
+
+    // Trazo de los últimos 30 min para que la ruta se vea desde que abres el panel
+    const desde30 = new Date(Date.now() - 30 * 60000).toISOString();
+    await Promise.all(datos.map(async d => {
+      try {
+        const ll = filtrarRuido(await api(`/api/historial/${d.uuid}?desde=${encodeURIComponent(desde30)}`)).map(p => [p.lat, p.lng]);
+        const e = estela(d.uuid); e.linea.setLatLngs(ll); e.sombra.setLatLngs(ll);
+      } catch (_) {}
+    }));
+
+    // Centrar el mapa en el conjunto de dispositivos si hay alguno
+    const puntos = Object.values(marcadores).map(m => m.getLatLng());
+    if (puntos.length > 0) map.fitBounds(L.latLngBounds(puntos), { maxZoom: 13, padding: [40, 40] });
+  }
+  cargarDispositivos();
+
+  // ---------- WebSocket en vivo ----------
+  function conectarWS() {
+    const protocolo = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${protocolo}://${location.host}/ws/live?key=${encodeURIComponent(KEY)}`);
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.tipo === 'alerta') { mostrarAlerta(msg, true); return; }
+      if (msg.tipo === 'alerta_resuelta') { cerrarAlerta(msg.id, msg.uuid); return; }
+      if (msg.tipo === 'ubicacion') {
+        dispositivos[msg.uuid] = {
+          ...(dispositivos[msg.uuid] || {}),
+          uuid: msg.uuid, nombre: msg.nombre,
+          ultima_lat: msg.lat, ultima_lng: msg.lng,
+          ultima_conexion: msg.recibido || msg.timestamp, ultima_ip: msg.ip,
+          battery: msg.battery ?? (dispositivos[msg.uuid] || {}).battery, speed: msg.speed,
+        };
+        actualizarMarcador({ ...msg, live: true });
+        renderListaDispositivos();
+      }
+    };
+    ws.onclose = () => setTimeout(conectarWS, 3000); // reconectar solo
+  }
+  conectarWS();
+
+  setInterval(() => { renderListaDispositivos(); Object.keys(marcadores).forEach(refrescarEtiqueta); }, 15000); // refresca 'en línea' / 'hace X min'
+
+  // ---------- Historial / ruta ----------
+  document.getElementById('btnVerRuta').addEventListener('click', async () => {
+    if (!uuidActivo) { alert('Selecciona un dispositivo primero.'); return; }
+    const desde = document.getElementById('fechaDesde').value;
+    const hasta = document.getElementById('fechaHasta').value;
+
+    let url = `/api/historial/${uuidActivo}?`;
+    if (desde) url += `desde=${encodeURIComponent(new Date(desde + 'T00:00:00').toISOString())}&`;
+    if (hasta) url += `hasta=${encodeURIComponent(new Date(hasta + 'T23:59:59').toISOString())}&`;
+
+    let puntos;
+    try { puntos = await api(url); } catch (e) { alert('No se pudo cargar el historial.'); return; }
+    puntos = filtrarRuido(puntos);
+    ultimaRuta = puntos;
+
+    if (capaRuta) { map.removeLayer(capaRuta); capaRuta = null; }
+
+    if (puntos.length === 0) {
+      document.getElementById('rutaStats').textContent = 'No hay puntos registrados en ese rango de fechas.';
+      return;
+    }
+
+    const latlngs = puntos.map(p => [p.lat, p.lng]);
+    capaRuta = L.layerGroup().addTo(map);
+    L.polyline(latlngs, { color: '#000', weight: 9, opacity: 0.25, lineCap: 'round', lineJoin: 'round' }).addTo(capaRuta);
+    L.polyline(latlngs, { color: colorPara(uuidActivo), weight: 5, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(capaRuta);
+    L.circleMarker(latlngs[0], { radius: 6, color: '#4fd1a5', fillOpacity: 1 }).bindTooltip('Inicio').addTo(capaRuta);
+    L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color: '#e06c75', fillOpacity: 1 }).bindTooltip('Fin').addTo(capaRuta);
+    map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40] });
+
+    // Distancia total (Haversine)
+    function distanciaKm(a, b) {
+      const R = 6371;
+      const dLat = (b[0] - a[0]) * Math.PI / 180;
+      const dLng = (b[1] - a[1]) * Math.PI / 180;
+      const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(s));
+    }
+    let total = 0;
+    for (let i = 1; i < latlngs.length; i++) total += distanciaKm(latlngs[i - 1], latlngs[i]);
+
+    const inicio = new Date(puntos[0].timestamp);
+    const fin = new Date(puntos[puntos.length - 1].timestamp);
+    const vmax = Math.max(0, ...puntos.map(p => p.speed || 0)) * 3.6;
+    const horas = (fin - inicio) / 3600000;
+    const bat = puntos.map(p => p.battery).filter(b => b != null);
+    document.getElementById('rutaStats').innerHTML =
+      `<strong style="color:${colorPara(uuidActivo)}">● ${esc((dispositivos[uuidActivo] || {}).nombre || uuidActivo)}</strong><br>` +
+      `${puntos.length} puntos · ${total.toFixed(2)} km<br>` +
+      `Duración: ${Math.floor(horas)} h ${Math.round((horas % 1) * 60)} min<br>` +
+      `Vel. máx: ${vmax.toFixed(0)} km/h · prom: ${horas > 0 ? (total / horas).toFixed(1) : '0'} km/h<br>` +
+      (bat.length ? `Batería: ${Math.round(bat[0])}% → ${Math.round(bat[bat.length - 1])}%<br>` : '') +
+      `Del ${inicio.toLocaleString()}<br>al ${fin.toLocaleString()}`;
+  });
+
+  document.getElementById('btnLimpiarRuta').addEventListener('click', () => {
+    if (capaRuta) { map.removeLayer(capaRuta); capaRuta = null; }
+    document.getElementById('rutaStats').textContent = '';
+    if (uuidActivo && estelas[uuidActivo]) { estelas[uuidActivo].linea.setLatLngs([]); estelas[uuidActivo].sombra.setLatLngs([]); }
+  });
+
+  ['optTrazos', 'optEtq', 'optPrec'].forEach(id => document.getElementById(id).addEventListener('change', aplicarOpciones));
+  const fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  document.querySelectorAll('[data-rango]').forEach(b => b.addEventListener('click', () => {
+    const hoy = new Date(), ayer = new Date(Date.now() - 86400000), hace7 = new Date(Date.now() - 6 * 86400000);
+    const r = { hoy: [hoy, hoy], ayer: [ayer, ayer], '7d': [hace7, hoy], todo: [null, null] }[b.dataset.rango];
+    document.getElementById('fechaDesde').value = r[0] ? fmt(r[0]) : '';
+    document.getElementById('fechaHasta').value = r[1] ? fmt(r[1]) : '';
+    document.getElementById('btnVerRuta').click();
+  }));
+  const enviar = (metodo, url, cuerpo) => fetch(url, { method: metodo, headers: { 'Content-Type': 'application/json', 'X-Key': KEY }, body: cuerpo ? JSON.stringify(cuerpo) : undefined })
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+  const nombreActivo = () => (dispositivos[uuidActivo] || {}).nombre || uuidActivo;
+
+  document.getElementById('colorDisp').addEventListener('change', async e => {
+    if (!uuidActivo) return;
+    try { await enviar('PUT', `/api/dispositivos/${uuidActivo}`, { color: e.target.value }); dispositivos[uuidActivo].color = e.target.value; aplicarColor(uuidActivo); }
+    catch (_) { alert('No se pudo guardar el color.'); }
+  });
+  document.getElementById('btnRenombrar').addEventListener('click', async () => {
+    if (!uuidActivo) return alert('Selecciona un dispositivo primero.');
+    const n = prompt('Nuevo nombre:', nombreActivo()); if (!n || !n.trim()) return;
+    try { await enviar('PUT', `/api/dispositivos/${uuidActivo}`, { nombre: n.trim() }); dispositivos[uuidActivo].nombre = n.trim(); refrescarEtiqueta(uuidActivo); seleccionarDispositivo(uuidActivo); }
+    catch (_) { alert('No se pudo renombrar.'); }
+  });
+  document.getElementById('btnBorrarRuta').addEventListener('click', async () => {
+    if (!uuidActivo) return alert('Selecciona un dispositivo primero.');
+    const desde = document.getElementById('fechaDesde').value, hasta = document.getElementById('fechaHasta').value;
+    const alcance = (desde || hasta) ? `los puntos ${desde ? 'desde ' + desde : ''} ${hasta ? 'hasta ' + hasta : ''}` : 'TODO el historial';
+    if (!confirm(`¿Borrar ${alcance} de "${nombreActivo()}"? No se puede deshacer.`)) return;
+    let url = `/api/historial/${uuidActivo}?`;
+    if (desde) url += `desde=${encodeURIComponent(new Date(desde + 'T00:00:00').toISOString())}&`;
+    if (hasta) url += `hasta=${encodeURIComponent(new Date(hasta + 'T23:59:59').toISOString())}&`;
+    try {
+      const r = await enviar('DELETE', url);
+      document.getElementById('btnLimpiarRuta').click();
+      document.getElementById('rutaStats').textContent = `${r.borrados} puntos borrados.`;
+    } catch (_) { alert('No se pudo borrar el historial.'); }
+  });
+  document.getElementById('btnEliminar').addEventListener('click', async () => {
+    if (!uuidActivo) return alert('Selecciona un dispositivo primero.');
+    if (!confirm(`¿Eliminar "${nombreActivo()}" y todo su historial?`)) return;
+    try {
+      const u = uuidActivo;
+      await enviar('DELETE', `/api/dispositivos/${u}`);
+      [marcadores, circulos].forEach(o => { if (o[u]) { map.removeLayer(o[u]); delete o[u]; } });
+      if (estelas[u]) { map.removeLayer(estelas[u].linea); map.removeLayer(estelas[u].sombra); delete estelas[u]; }
+      delete dispositivos[u]; uuidActivo = null;
+      document.getElementById('dispositivoSeleccionado').textContent = 'Ninguno';
+      document.getElementById('btnLimpiarRuta').click(); renderListaDispositivos();
+    } catch (_) { alert('No se pudo eliminar.'); }
+  });
+
+  // ---------- Alertas / SOS ----------
+  const alertas = {}, sosMarks = {};
+  let audioCtx = null, sirenaTimer = null;
+  const ICONOS = { sos: '🆘', caida: '🤕', impacto: '💥', bateria: '🪫', lugar: '📍' };
+  const esCritica = t => t === 'sos' || t === 'caida';
+  const TITULOS = { sos: 'SOS · ¡Botón de pánico!', caida: 'Caída detectada', impacto: 'Impacto fuerte', bateria: 'Batería baja', lugar: 'Geocerca' };
+  function tono(f, t0, dur) {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = 'square'; o.frequency.value = f; g.gain.value = 0.08;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(audioCtx.currentTime + t0); o.stop(audioCtx.currentTime + t0 + dur);
+  }
+  const sirena = () => { if (audioCtx) { tono(880, 0, 0.25); tono(660, 0.3, 0.25); tono(880, 0.6, 0.25); } };
+  function actualizarSirena() {
+    const hay = Object.keys(sosActivos).length > 0;
+    if (hay && !sirenaTimer) { sirena(); sirenaTimer = setInterval(sirena, 1500); }
+    if (!hay && sirenaTimer) { clearInterval(sirenaTimer); sirenaTimer = null; }
+  }
+  document.getElementById('btnAlertas').addEventListener('click', async () => {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission();
+    const b = document.getElementById('btnAlertas'); b.textContent = '🔔 Alertas activas'; b.classList.add('on');
+    tono(880, 0, 0.15); actualizarSirena();
+  });
+  function irA(a) {
+    if (a.lat != null) map.setView([a.lat, a.lng], 17);
+    if (dispositivos[a.uuid]) seleccionarDispositivo(a.uuid);
+  }
+  function renderToast(a) {
+    let el = document.getElementById('toast-' + a.id);
+    if (!a.activa && esCritica(a.alerta_tipo)) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.id = 'toast-' + a.id; document.getElementById('toasts').appendChild(el); }
+    el.className = 'toast ' + a.alerta_tipo;
+    el.innerHTML = `<div class="toast-t">${ICONOS[a.alerta_tipo] || '⚠️'} ${esc(a.nombre)}</div>` +
+      `<div>${esc(TITULOS[a.alerta_tipo] || a.alerta_tipo)}${a.mensaje ? ' · ' + esc(a.mensaje) : ''}</div>` +
+      `<div class="toast-s">${fechaCorta(a.creado)}</div>` +
+      `<div class="toast-b"><button data-ir>Ver en mapa</button><button data-ok class="secundario">${esCritica(a.alerta_tipo) ? 'Atendida' : 'Cerrar'}</button></div>`;
+    el.querySelector('[data-ir]').onclick = () => irA(a);
+    el.querySelector('[data-ok]').onclick = () => esCritica(a.alerta_tipo) ? enviar('POST', `/api/alerta/${a.id}/resolver`).catch(() => alert('No se pudo marcar como atendida.')) : el.remove();
+  }
+  function mostrarAlerta(a, nueva) {
+    alertas[a.id] = a;
+    if (esCritica(a.alerta_tipo) && a.activa) {
+      sosActivos[a.uuid] = a;
+      if (a.lat != null && !sosMarks[a.id]) sosMarks[a.id] = L.marker([a.lat, a.lng], { icon: L.divIcon({ className: '', html: '<div class="sos-pulse"></div>', iconSize: [28, 28], iconAnchor: [14, 14] }), zIndexOffset: 2000, interactive: false }).addTo(map);
+    }
+    if (nueva || (a.activa && esCritica(a.alerta_tipo))) renderToast(a);
+    if (nueva) {
+      if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+        new Notification(`${ICONOS[a.alerta_tipo] || '⚠️'} ${a.nombre}`, { body: TITULOS[a.alerta_tipo] || a.alerta_tipo });
+      }
+      if (esCritica(a.alerta_tipo)) irA(a);
+    }
+    actualizarSirena(); renderListaAlertas(); renderListaDispositivos(); refrescarEtiqueta(a.uuid);
+  }
+  function cerrarAlerta(id, uuid) {
+    if (alertas[id]) alertas[id].activa = false;
+    delete sosActivos[uuid];
+    if (sosMarks[id]) { map.removeLayer(sosMarks[id]); delete sosMarks[id]; }
+    const el = document.getElementById('toast-' + id); if (el) el.remove();
+    actualizarSirena(); renderListaAlertas(); renderListaDispositivos(); refrescarEtiqueta(uuid);
+  }
+  function renderListaAlertas() {
+    const items = Object.values(alertas).sort((a, b) => b.creado.localeCompare(a.creado));
+    const n = Object.keys(sosActivos).length;
+    document.getElementById('contAl').textContent = n ? '🔴' + n : '';
+    document.getElementById('listaAlertas').innerHTML = items.length ? items.map(a =>
+      `<div class="device ${a.activa && esCritica(a.alerta_tipo) ? 'sos' : ''}" data-id="${a.id}"><div class="device-info">` +
+      `<div class="device-nombre">${ICONOS[a.alerta_tipo] || '⚠️'} ${esc(a.nombre)}</div>` +
+      `<div class="device-meta">${esc(TITULOS[a.alerta_tipo] || a.alerta_tipo)} · ${fechaCorta(a.creado)}${a.activa ? '' : ' · atendida'}</div></div></div>`).join('')
+      : '<div class="device-empty">Sin alertas todavía.</div>';
+    document.querySelectorAll('#listaAlertas [data-id]').forEach(el => el.onclick = () => irA(alertas[el.dataset.id]));
+  }
+  const TIT = { disp: 'Dispositivos', al: 'Alertas', hist: 'Historial de rutas', cfg: 'Ajustes' };
+  const refrescarMapa = () => setTimeout(() => map.invalidateSize(), 260);
+  function abrirSeccion(sec, alternar) {
+    const lay = document.querySelector('.layout'), actual = document.querySelector('.rail-btn.activa');
+    if (alternar && actual && actual.dataset.sec === sec && !lay.classList.contains('sin-panel')) { lay.classList.add('sin-panel'); refrescarMapa(); return; }
+    lay.classList.remove('sin-panel');
+    document.querySelectorAll('.sec').forEach(e => { e.hidden = e.id !== 'sec-' + sec; });
+    document.querySelectorAll('.rail-btn').forEach(b => b.classList.toggle('activa', b.dataset.sec === sec));
+    document.getElementById('tituloSec').textContent = TIT[sec];
+    refrescarMapa();
+  }
+  document.querySelectorAll('.rail-btn').forEach(b => { b.onclick = () => abrirSeccion(b.dataset.sec, true); });
+  document.getElementById('btnCerrarPanel').onclick = () => { document.querySelector('.layout').classList.add('sin-panel'); refrescarMapa(); };
+  document.querySelectorAll('[data-base]').forEach(b => {
+    b.classList.toggle('activa', b.dataset.base === baseActual);
+    b.onclick = () => {
+      Object.values(bases).forEach(l => map.removeLayer(l)); bases[b.dataset.base].addTo(map);
+      localStorage.setItem('gps_base', b.dataset.base);
+      document.getElementById('map').classList.toggle('suave', b.dataset.base === 'osm');
+      document.querySelectorAll('[data-base]').forEach(x => x.classList.toggle('activa', x === b));
+    };
+  });
+  document.getElementById('btnCentrar').onclick = () => {
+    const pts = Object.values(marcadores).map(m => m.getLatLng());
+    if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [60, 60], maxZoom: 16 });
+  };
+  api('/api/alertas?limit=30').then(l => l.reverse().forEach(a => mostrarAlerta(a, false))).catch(() => {});
+
+  // ---------- Actividad (según la velocidad que reporta el GPS del celular) ----------
+  function actividad(v) {
+    return v < 0.6 ? '⏸ Detenido' : v < 2.0 ? '🚶 Caminando' : v < 4.5 ? '🚴 Corriendo / bici' : '🚗 En vehículo';
+  }
+
+  // ---------- Lugares (geocercas) ----------
+  const capasLugar = {};
+  function dibujarLugar(l) {
+    if (capasLugar[l.id]) map.removeLayer(capasLugar[l.id]);
+    capasLugar[l.id] = L.circle([l.lat, l.lng], { radius: l.radio, color: '#7c3aed', weight: 2, dashArray: '6 6', fillColor: '#7c3aed', fillOpacity: 0.08 })
+      .bindTooltip('📍 ' + l.nombre).addTo(map);
+  }
+  function renderLugares(lista) {
+    document.getElementById('listaLugares').innerHTML = lista.length ? lista.map(l =>
+      `<div class="fila-sw"><span>📍 ${esc(l.nombre)} · ${Math.round(l.radio)} m</span><button class="peligro" data-del="${l.id}" style="flex:none;padding:4px 9px">✕</button></div>`).join('')
+      : '<div class="device-empty" style="padding:12px">Sin lugares. Agrega Casa, Colegio, Trabajo…</div>';
+    document.querySelectorAll('#listaLugares [data-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('¿Eliminar este lugar?')) return;
+      try { await enviar('DELETE', `/api/lugares/${b.dataset.del}`); map.removeLayer(capasLugar[b.dataset.del]); delete capasLugar[b.dataset.del]; cargarLugares(); }
+      catch (_) { alert('No se pudo eliminar.'); }
+    });
+  }
+  function cargarLugares() { api('/api/lugares').then(ls => { ls.forEach(dibujarLugar); renderLugares(ls); }).catch(() => {}); }
+  cargarLugares();
+  document.getElementById('btnAddLugar').onclick = () => {
+    document.querySelector('.layout').classList.add('sin-panel'); refrescarMapa();
+    alert('Haz clic en el mapa donde quieres el lugar.');
+    map.once('click', async e => {
+      const nombre = prompt('Nombre del lugar (ej. Casa, Colegio):');
+      const radio = nombre ? parseInt(prompt('Radio en metros:', '100'), 10) || 100 : 0;
+      if (nombre && nombre.trim()) {
+        try { dibujarLugar(await enviar('POST', '/api/lugares', { nombre: nombre.trim(), lat: e.latlng.lat, lng: e.latlng.lng, radio })); cargarLugares(); }
+        catch (_) { alert('No se pudo guardar el lugar.'); }
+      }
+      abrirSeccion('cfg');
+    });
+  };
+
+  // ---------- Comandos al celular ----------
+  async function comando(tipo, aviso) {
+    if (!uuidActivo) return alert('Selecciona un dispositivo primero.');
+    try { await enviar('POST', `/api/dispositivos/${uuidActivo}/comando`, { tipo }); alert(aviso); }
+    catch (_) { alert('No se pudo enviar el comando.'); }
+  }
+  document.getElementById('btnSonar').onclick = () => comando('sonar', 'Enviado. El celular suena en unos segundos (la app debe tener el rastreo iniciado).');
+  document.getElementById('btnUbicar').onclick = () => comando('ubicar', 'Enviado. La ubicación se actualizará en unos segundos.');
+
+  // ---------- Reproducir la ruta ----------
+  let playTimer = null, playMarker = null;
+  document.getElementById('btnPlay').onclick = () => {
+    if (playTimer || playMarker) {
+      clearInterval(playTimer); playTimer = null;
+      if (playMarker) { map.removeLayer(playMarker); playMarker = null; }
+      return;
+    }
+    if (ultimaRuta.length < 2) return alert('Primero pulsa "Ver ruta".');
+    const paso = Math.max(1, Math.round(ultimaRuta.length / 300)); let i = 0;
+    playMarker = L.circleMarker([ultimaRuta[0].lat, ultimaRuta[0].lng], { radius: 9, color: '#fff', weight: 3, fillColor: colorPara(uuidActivo), fillOpacity: 1 }).addTo(map);
+    playTimer = setInterval(() => {
+      i = Math.min(i + paso, ultimaRuta.length - 1);
+      const p = ultimaRuta[i];
+      const t = fechaCorta(p.timestamp) + (p.speed != null ? ' · ' + (p.speed * 3.6).toFixed(0) + ' km/h' : '');
+      playMarker.setLatLng([p.lat, p.lng]);
+      if (playMarker.getTooltip()) playMarker.setTooltipContent(t); else playMarker.bindTooltip(t, { permanent: true, direction: 'top' }).openTooltip();
+      if (i >= ultimaRuta.length - 1) { clearInterval(playTimer); playTimer = null; }
+    }, 60);
+  };
+
+  document.getElementById('btnGpx').addEventListener('click', () => {
+    if (!ultimaRuta.length) { alert('Primero pulsa "Ver ruta".'); return; }
+    const gpx = '<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="GPS Tracker" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>' +
+      esc((dispositivos[uuidActivo] || {}).nombre || uuidActivo) + '</name><trkseg>' +
+      ultimaRuta.map(p => `<trkpt lat="${p.lat}" lon="${p.lng}"><time>${p.timestamp}</time></trkpt>`).join('') + '</trkseg></trk></gpx>';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([gpx], { type: 'application/gpx+xml' }));
+    a.download = 'ruta.gpx'; a.click();
+  });
+</script>
+</body>
+</html>
